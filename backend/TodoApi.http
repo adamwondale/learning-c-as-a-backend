@@ -1,0 +1,49 @@
+@Host = http://localhost:5000
+
+### 1. GET all todos
+GET {{Host}}/api/todos
+Accept: application/json
+
+### 2. POST create a new todo
+POST {{Host}}/api/todos
+Content-Type: application/json
+
+{
+  "title": "Learn C# and ASP.NET Core"
+}
+
+### 3. POST create a second todo
+POST {{Host}}/api/todos
+Content-Type: application/json
+
+{
+  "title": "Build Next.js Frontend"
+}
+
+### 4. GET single todo by ID
+GET {{Host}}/api/todos/1
+Accept: application/json
+
+### 5. PUT full update (replaces title and sets isCompleted)
+PUT {{Host}}/api/todos/1
+Content-Type: application/json
+
+{
+  "title": "Learn C# and ASP.NET Core (Completed!)",
+  "isCompleted": true
+}
+
+### 6. PATCH partial update (toggle only isCompleted)
+PATCH {{Host}}/api/todos/2
+Content-Type: application/json
+
+{
+  "isCompleted": true
+}
+
+### 7. GET completed todos only (filter test)
+GET {{Host}}/api/todos?isCompleted=true
+Accept: application/json
+
+### 8. DELETE todo
+DELETE {{Host}}/api/todos/2
