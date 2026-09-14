@@ -49,6 +49,8 @@ services:
       # Gives Watchtower permission to recreate containers via Docker Desktop
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      # Match modern Docker API version
+      - DOCKER_API_VERSION=1.44
       # Check GitHub Container Registry every 30 seconds
       - WATCHTOWER_POLL_INTERVAL=30
       # Automatically delete old, superseded image layers to save disk space
