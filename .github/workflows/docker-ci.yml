@@ -1,0 +1,129 @@
+name: CI/CD - Build & Version Docker Images
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*.*.*" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # =================================================================
+  # Job 1: Build & Version Backend (.NET 9 Web API)
+  # =================================================================
+  build-backend:
+    name: Build & Push Backend Container
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set lowercase image name
+        run: |
+          echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/todo-backend" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate Docker metadata & version tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            # 1. Short Git commit SHA (e.g. :sha-a1b2c3d) - Unique & Immutable
+            type=sha,format=short,prefix=sha-
+            # 2. Sequential Build Number (e.g. :build-42)
+            type=raw,value=build-${{ github.run_number }}
+            # 3. Branch name (e.g. :main)
+            type=ref,event=branch
+            # 4. Git semantic version release tags (e.g. :v1.0.0, :1.0)
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # 5. Rolling :latest tag (updated only on main branch)
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # =================================================================
+  # Job 2: Build & Version Frontend (Next.js)
+  # =================================================================
+  build-frontend:
+    name: Build & Push Frontend Container
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set lowercase image name
+        run: |
+          echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/todo-frontend" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate Docker metadata & version tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            # 1. Short Git commit SHA (e.g. :sha-a1b2c3d) - Unique & Immutable
+            type=sha,format=short,prefix=sha-
+            # 2. Sequential Build Number (e.g. :build-42)
+            type=raw,value=build-${{ github.run_number }}
+            # 3. Branch name (e.g. :main)
+            type=ref,event=branch
+            # 4. Git semantic version release tags (e.g. :v1.0.0, :1.0)
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # 5. Rolling :latest tag (updated only on main branch)
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
