@@ -13,10 +13,12 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   backend:
-    # APP_VERSION can be: latest, sha-a1b2c3d, build-42, or v1.0.0
     image: ghcr.io/adamwondale/todo-backend:${APP_VERSION:-latest}
     container_name: todo_backend
     restart: unless-stopped
+    labels:
+      # Tell Watchtower to automatically update this container
+      - "com.centurylinklabs.watchtower.enable=true"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=tododb;Username=postgres;Password=postgrespassword
@@ -26,16 +28,33 @@ services:
       - postgres
 
   frontend:
-    # APP_VERSION can be: latest, sha-a1b2c3d, build-42, or v1.0.0
     image: ghcr.io/adamwondale/todo-frontend:${APP_VERSION:-latest}
     container_name: todo_frontend
     restart: unless-stopped
+    labels:
+      # Tell Watchtower to automatically update this container
+      - "com.centurylinklabs.watchtower.enable=true"
     environment:
       - INTERNAL_BACKEND_URL=http://backend:8080
     ports:
       - "3000:3000"
     depends_on:
       - backend
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      # Gives Watchtower permission to recreate containers via Docker Desktop
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Check GitHub Container Registry every 30 seconds
+      - WATCHTOWER_POLL_INTERVAL=30
+      # Automatically delete old, superseded image layers to save disk space
+      - WATCHTOWER_CLEANUP=true
+      # Only auto-update containers explicitly marked with com.centurylinklabs.watchtower.enable=true
+      - WATCHTOWER_LABEL_ENABLE=true
 
 volumes:
   postgres_data:

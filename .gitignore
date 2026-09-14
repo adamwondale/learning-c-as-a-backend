@@ -10,6 +10,7 @@
 [Bb]in/
 [Oo]bj/
 appsettings.Development.json
+.agents/
 
 # Node / Next.js
 frontend/node_modules/
