@@ -27,6 +27,7 @@ export default function Home() {
   const [editTitle, setEditTitle] = useState("");
   const [logs, setLogs] = useState<HttpLog[]>([]);
   const [loading, setLoading] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Helper to log HTTP operations in our UI inspector
   const addLog = (
@@ -41,9 +42,9 @@ export default function Home() {
       method,
       url,
       status,
-      time: new Date().toLocaleTimeString(),
-      payload: payload ? JSON.stringify(payload) : undefined,
-      response: response ? JSON.stringify(response) : undefined,
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      payload: payload ? JSON.stringify(payload, null, 2) : undefined,
+      response: response ? JSON.stringify(response, null, 2) : undefined,
     };
     setLogs((prev) => [newEntry, ...prev.slice(0, 19)]);
   };
@@ -59,10 +60,10 @@ export default function Home() {
       const res = await fetch(url);
       const data = await res.json();
       setTodos(data);
-      addLog("GET", url, res.status, undefined, `${data.length} items`);
+      addLog("GET", url, res.status, undefined, `${data.length} tasks retrieved`);
     } catch (err) {
       console.error(err);
-      addLog("GET", url, 500, undefined, "Network/Server error");
+      addLog("GET", url, 500, undefined, "Network/Server connection failed");
     } finally {
       setLoading(false);
     }
@@ -90,13 +91,19 @@ export default function Home() {
       setTodos((prev) => [created, ...prev]);
     } catch (err) {
       console.error(err);
-      addLog("POST", "/api/todos", 500, payload, "Failed to create");
+      addLog("POST", "/api/todos", 500, payload, "Failed to create task");
     }
   };
 
   // 3. PATCH: Partial update (toggle completion)
   const handleToggle = async (todo: Todo) => {
-    const payload = { isCompleted: !todo.isCompleted };
+    const nextCompleted = !todo.isCompleted;
+    // Optimistic UI update for direct manipulation feedback
+    setTodos((prev) =>
+      prev.map((t) => (t.id === todo.id ? { ...t, isCompleted: nextCompleted } : t))
+    );
+
+    const payload = { isCompleted: nextCompleted };
     try {
       const res = await fetch(`/api/todos/${todo.id}`, {
         method: "PATCH",
@@ -105,19 +112,21 @@ export default function Home() {
       });
       const updated: Todo = await res.json();
       addLog("PATCH", `/api/todos/${todo.id}`, res.status, payload, updated);
-      setTodos((prev) =>
-        prev.map((t) => (t.id === todo.id ? { ...t, isCompleted: updated.isCompleted } : t))
-      );
     } catch (err) {
       console.error(err);
-      addLog("PATCH", `/api/todos/${todo.id}`, 500, payload, "Failed to patch");
+      // Revert on failure
+      setTodos((prev) =>
+        prev.map((t) => (t.id === todo.id ? { ...t, isCompleted: !nextCompleted } : t))
+      );
+      addLog("PATCH", `/api/todos/${todo.id}`, 500, payload, "Failed to patch completion state");
     }
   };
 
-  // 4. PUT: Full update (replace title & keep current state)
+  // 4. PUT: Full update (replace title & keep state)
   const handleSaveEdit = async (todo: Todo) => {
     if (!editTitle.trim()) return;
-    const payload = { title: editTitle.trim(), isCompleted: todo.isCompleted };
+    const titleToSave = editTitle.trim();
+    const payload = { title: titleToSave, isCompleted: todo.isCompleted };
 
     try {
       const res = await fetch(`/api/todos/${todo.id}`, {
@@ -127,12 +136,12 @@ export default function Home() {
       });
       addLog("PUT", `/api/todos/${todo.id}`, res.status, payload, "204 No Content");
       setTodos((prev) =>
-        prev.map((t) => (t.id === todo.id ? { ...t, title: editTitle.trim() } : t))
+        prev.map((t) => (t.id === todo.id ? { ...t, title: titleToSave } : t))
       );
       setEditingId(null);
     } catch (err) {
       console.error(err);
-      addLog("PUT", `/api/todos/${todo.id}`, 500, payload, "Failed to put");
+      addLog("PUT", `/api/todos/${todo.id}`, 500, payload, "Failed to update task title");
     }
   };
 
@@ -144,138 +153,171 @@ export default function Home() {
       setTodos((prev) => prev.filter((t) => t.id !== id));
     } catch (err) {
       console.error(err);
-      addLog("DELETE", `/api/todos/${id}`, 500, undefined, "Failed to delete");
+      addLog("DELETE", `/api/todos/${id}`, 500, undefined, "Failed to delete task");
     }
   };
 
-  const getMethodBadge = (method: HttpLog["method"]) => {
+  const handleCopy = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 1500);
+  };
+
+  const getMethodStyles = (method: HttpLog["method"]) => {
     switch (method) {
       case "GET":
-        return "bg-blue-900/60 text-blue-300 border-blue-700";
+        return "bg-sky-500/10 text-sky-400 border-sky-500/20";
       case "POST":
-        return "bg-emerald-900/60 text-emerald-300 border-emerald-700";
+        return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
       case "PUT":
-        return "bg-amber-900/60 text-amber-300 border-amber-700";
+        return "bg-amber-500/10 text-amber-400 border-amber-500/20";
       case "PATCH":
-        return "bg-purple-900/60 text-purple-300 border-purple-700";
+        return "bg-violet-500/10 text-violet-400 border-violet-500/20";
       case "DELETE":
-        return "bg-rose-900/60 text-rose-300 border-rose-700";
+        return "bg-rose-500/10 text-rose-400 border-rose-500/20";
     }
   };
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col items-center py-10 px-4">
+    <div className="min-h-screen bg-[#070709] text-zinc-100 flex flex-col items-center py-12 px-4 sm:px-6 selection:bg-violet-500/30 selection:text-white">
+      {/* Glow Backdrop */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[650px] h-[350px] bg-gradient-to-b from-violet-600/10 via-indigo-600/5 to-transparent blur-3xl opacity-70" />
+      </div>
+
       {/* Header */}
-      <header className="max-w-5xl w-full mb-8 text-center sm:text-left sm:flex sm:justify-between sm:items-end border-b border-neutral-800 pb-6">
+      <header className="max-w-5xl w-full mb-10 flex flex-col sm:flex-row sm:items-end justify-between gap-6 pb-6 border-b border-white/[0.06]">
         <div>
-          <div className="flex items-center gap-3 justify-center sm:justify-start mb-2">
-            <span className="px-2.5 py-1 text-xs font-semibold uppercase tracking-wider rounded bg-violet-500/20 text-violet-300 border border-violet-500/30">
-              Fullstack C# + Next.js
+          <div className="inline-flex items-center gap-2 mb-2.5">
+            <span className="px-2.5 py-0.5 text-[11px] font-medium tracking-wide rounded-full bg-white/[0.04] text-zinc-400 border border-white/[0.08] backdrop-blur-md">
+              Fullstack .NET 9 + Next.js
             </span>
-            <span className="px-2.5 py-1 text-xs font-semibold uppercase tracking-wider rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
-              PostgreSQL
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[11px] font-medium tracking-wide rounded-full bg-emerald-500/[0.08] text-emerald-400 border border-emerald-500/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              PostgreSQL Connected
             </span>
           </div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
+          <h1 className="text-3xl sm:text-4xl font-semibold tracking-[-0.03em] text-white">
             Todo & HTTP Inspector
           </h1>
-          <p className="text-neutral-400 text-sm mt-1">
-            Explore all 5 REST operations (GET, POST, PUT, PATCH, DELETE) live against ASP.NET Core!
+          <p className="text-zinc-400 text-sm mt-1.5 leading-relaxed">
+            Live telemetry and REST API operations executed directly against ASP.NET Core
           </p>
         </div>
 
         <button
           onClick={() => fetchTodos()}
-          className="mt-4 sm:mt-0 inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 transition"
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-medium rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-200 border border-white/[0.08] shadow-[0_2px_8px_rgba(0,0,0,0.3)] transition-all duration-150 active:scale-[0.97] cursor-pointer disabled:opacity-50"
         >
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <svg
+            className={`w-3.5 h-3.5 text-zinc-400 transition-transform ${loading ? "animate-spin" : ""}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
           Refresh (GET)
         </button>
       </header>
 
-      {/* Main Grid: Left is Todo App, Right is Live HTTP Inspector */}
-      <div className="max-w-5xl w-full grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Todo Management */}
+      {/* Main Grid: Left is Tasks, Right is Inspector */}
+      <div className="max-w-5xl w-full grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        {/* Left Column: Tasks */}
         <section className="lg:col-span-7 flex flex-col gap-6">
-          {/* Add Todo Form (POST) */}
-          <div className="bg-neutral-900/90 border border-neutral-800 p-5 rounded-2xl shadow-xl backdrop-blur">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-300">
-                Add Task
-              </h2>
-              <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+          {/* Add Todo Card (POST) */}
+          <div className="bg-zinc-900/60 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-5 shadow-[0_8px_30px_rgba(0,0,0,0.35)] relative overflow-hidden">
+            <div className="flex items-center justify-between mb-3.5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                New Task
+              </span>
+              <span className="px-2 py-0.5 text-[11px] font-mono font-medium rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                 POST /api/todos
               </span>
             </div>
-            <form onSubmit={handleCreate} className="flex gap-2">
+
+            <form onSubmit={handleCreate} className="relative flex items-center">
               <input
                 type="text"
                 placeholder="What needs to be done?"
                 value={newTitle}
                 onChange={(e) => setNewTitle(e.target.value)}
-                className="flex-1 bg-neutral-950 border border-neutral-700 focus:border-violet-500 rounded-xl px-4 py-2.5 text-sm text-white placeholder-neutral-500 focus:outline-none transition"
+                className="w-full bg-zinc-950/80 border border-white/[0.08] focus:border-violet-500/60 rounded-xl pl-4 pr-24 py-3 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition-colors duration-150 shadow-inner"
               />
               <button
                 type="submit"
-                className="bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium px-5 py-2.5 rounded-xl transition shadow-lg shadow-violet-600/20 flex items-center gap-1 cursor-pointer"
+                disabled={!newTitle.trim()}
+                className="absolute right-1.5 px-3.5 py-1.5 text-xs font-medium rounded-lg bg-violet-600 hover:bg-violet-500 text-white transition-all duration-150 active:scale-[0.97] disabled:opacity-40 disabled:pointer-events-none shadow-[0_2px_10px_rgba(124,58,237,0.3)] cursor-pointer"
               >
                 Create
               </button>
             </form>
           </div>
 
-          {/* Filter Bar (GET with Query Params) */}
-          <div className="flex items-center justify-between px-2">
-            <div className="inline-flex rounded-xl p-1 bg-neutral-900 border border-neutral-800 text-xs font-medium">
+          {/* Segmented Filter Control */}
+          <div className="flex items-center justify-between px-1">
+            <div className="inline-flex rounded-xl p-1 bg-zinc-900/70 border border-white/[0.06] backdrop-blur-md">
               {(["all", "active", "completed"] as const).map((mode) => (
                 <button
                   key={mode}
                   onClick={() => setFilter(mode)}
-                  className={`px-3 py-1.5 rounded-lg capitalize transition cursor-pointer ${
+                  className={`px-3.5 py-1.5 text-xs font-medium rounded-lg capitalize transition-all duration-150 cursor-pointer active:scale-[0.97] ${
                     filter === mode
-                      ? "bg-violet-600 text-white shadow-sm"
-                      : "text-neutral-400 hover:text-white"
+                      ? "bg-zinc-800 text-white shadow-sm border border-white/[0.08]"
+                      : "text-zinc-400 hover:text-zinc-200"
                   }`}
                 >
                   {mode}
                 </button>
               ))}
             </div>
-            <span className="text-xs text-neutral-500 font-mono">
+
+            <span className="text-xs text-zinc-500 font-mono tracking-tight">
               {todos.length} {todos.length === 1 ? "task" : "tasks"}
             </span>
           </div>
 
-          {/* Todo Items List */}
-          <div className="flex flex-col gap-3">
+          {/* Tasks List */}
+          <div className="flex flex-col gap-2.5">
             {loading && todos.length === 0 ? (
-              <div className="p-8 text-center text-sm text-neutral-500">Loading tasks...</div>
+              <div className="p-12 text-center text-sm text-zinc-500">
+                <div className="inline-block w-4 h-4 border-2 border-zinc-500 border-t-transparent rounded-full animate-spin mb-2" />
+                <p>Loading tasks from database...</p>
+              </div>
             ) : todos.length === 0 ? (
-              <div className="p-8 text-center text-sm text-neutral-500 bg-neutral-900/40 rounded-2xl border border-neutral-800/60">
-                No tasks found. Create one above to test POST!
+              <div className="p-12 text-center rounded-2xl border border-dashed border-white/[0.08] bg-zinc-900/30 text-zinc-500">
+                <p className="text-sm font-medium text-zinc-400">No tasks in this view</p>
+                <p className="text-xs text-zinc-500 mt-1">Add one above to trigger a live POST request</p>
               </div>
             ) : (
               todos.map((todo) => (
                 <div
                   key={todo.id}
-                  className={`group bg-neutral-900/70 hover:bg-neutral-900 border transition-all duration-200 rounded-xl p-4 flex items-center justify-between gap-3 ${
+                  className={`group bg-zinc-900/50 hover:bg-zinc-900/80 border rounded-xl p-3.5 flex items-center justify-between gap-3 transition-all duration-150 ${
                     todo.isCompleted
-                      ? "border-neutral-800/50 opacity-75"
-                      : "border-neutral-800 hover:border-neutral-700"
+                      ? "border-white/[0.04] opacity-60 bg-zinc-950/40"
+                      : "border-white/[0.08] hover:border-white/[0.14] shadow-[0_2px_8px_rgba(0,0,0,0.2)]"
                   }`}
                 >
                   {/* Toggle Checkbox (PATCH) */}
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className="flex items-center gap-3.5 flex-1 min-w-0">
                     <button
-                      title="Toggle completed (PATCH)"
+                      type="button"
+                      title="Toggle completion (PATCH)"
                       onClick={() => handleToggle(todo)}
-                      className={`w-5 h-5 rounded-md flex items-center justify-center transition border cursor-pointer ${
+                      className={`w-5 h-5 rounded-md flex items-center justify-center transition-all duration-150 active:scale-[0.92] cursor-pointer border ${
                         todo.isCompleted
-                          ? "bg-emerald-500 border-emerald-500 text-neutral-950 font-bold"
-                          : "border-neutral-600 hover:border-violet-500"
+                          ? "bg-emerald-500 border-emerald-500 text-zinc-950 shadow-[0_0_12px_rgba(16,185,129,0.3)]"
+                          : "border-zinc-700 hover:border-zinc-500 bg-zinc-950/60"
                       }`}
                     >
-                      {todo.isCompleted && "✓"}
+                      {todo.isCompleted && (
+                        <svg className="w-3.5 h-3.5 stroke-[2.5]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
                     </button>
 
                     {editingId === todo.id ? (
@@ -284,26 +326,32 @@ export default function Home() {
                           type="text"
                           value={editTitle}
                           onChange={(e) => setEditTitle(e.target.value)}
-                          className="flex-1 bg-neutral-950 border border-violet-500 rounded-lg px-2.5 py-1 text-sm text-white focus:outline-none"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSaveEdit(todo);
+                            if (e.key === "Escape") setEditingId(null);
+                          }}
+                          className="flex-1 bg-zinc-950 border border-violet-500/70 rounded-lg px-2.5 py-1 text-sm text-white focus:outline-none"
                           autoFocus
                         />
                         <button
                           onClick={() => handleSaveEdit(todo)}
-                          className="px-2.5 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 font-medium text-white cursor-pointer"
+                          className="px-2.5 py-1 text-xs font-medium rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-all active:scale-[0.97] cursor-pointer"
                         >
-                          Save (PUT)
+                          Save
                         </button>
                         <button
                           onClick={() => setEditingId(null)}
-                          className="px-2.5 py-1 text-xs rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 cursor-pointer"
+                          className="px-2.5 py-1 text-xs font-medium rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-all active:scale-[0.97] cursor-pointer"
                         >
                           Cancel
                         </button>
                       </div>
                     ) : (
                       <span
-                        className={`text-sm truncate cursor-pointer ${
-                          todo.isCompleted ? "line-through text-neutral-500" : "text-neutral-200"
+                        className={`text-sm select-none cursor-pointer transition-colors duration-150 truncate ${
+                          todo.isCompleted
+                            ? "line-through text-zinc-500"
+                            : "text-zinc-200 group-hover:text-white"
                         }`}
                         onClick={() => handleToggle(todo)}
                       >
@@ -312,25 +360,27 @@ export default function Home() {
                     )}
                   </div>
 
-                  {/* Actions (PUT edit & DELETE) */}
+                  {/* Actions (PUT & DELETE) */}
                   {editingId !== todo.id && (
-                    <div className="flex items-center gap-2 opacity-80 group-hover:opacity-100 transition">
+                    <div className="flex items-center gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity duration-150">
                       <button
                         title="Edit title (PUT)"
                         onClick={() => {
                           setEditingId(todo.id);
                           setEditTitle(todo.title);
                         }}
-                        className="px-2 py-1 text-xs rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700 cursor-pointer"
+                        className="px-2 py-1 text-[11px] font-medium rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 border border-white/[0.06] transition-all active:scale-[0.96] cursor-pointer"
                       >
-                        Edit (PUT)
+                        Edit
                       </button>
                       <button
                         title="Delete task (DELETE)"
                         onClick={() => handleDelete(todo.id)}
-                        className="px-2 py-1 text-xs rounded-md bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 cursor-pointer"
+                        className="p-1.5 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all active:scale-[0.92] cursor-pointer"
                       >
-                        ✕ (DELETE)
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
                       </button>
                     </div>
                   )}
@@ -343,70 +393,90 @@ export default function Home() {
         {/* Right Column: Live HTTP Inspector Console */}
         <section className="lg:col-span-5 flex flex-col gap-3">
           <div className="flex items-center justify-between px-1">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-300 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-violet-400"></span>
-              Live HTTP Inspector
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-violet-400" />
+              Live HTTP Telemetry
             </h2>
             {logs.length > 0 && (
               <button
                 onClick={() => setLogs([])}
-                className="text-xs text-neutral-500 hover:text-neutral-300 cursor-pointer"
+                className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer active:scale-[0.97]"
               >
                 Clear
               </button>
             )}
           </div>
 
-          <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-4 shadow-xl flex flex-col gap-2 max-h-[600px] overflow-y-auto">
+          <div className="bg-zinc-900/60 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-3.5 shadow-[0_8px_30px_rgba(0,0,0,0.35)] flex flex-col gap-2 max-h-[620px] overflow-y-auto">
             {logs.length === 0 ? (
-              <p className="text-xs text-neutral-500 text-center py-10">
-                Perform any action on the left (Add, Toggle, Edit, Delete) to see live HTTP telemetry here!
-              </p>
+              <div className="py-14 text-center px-4">
+                <div className="w-8 h-8 mx-auto mb-2 text-zinc-600 flex items-center justify-center rounded-lg bg-zinc-950 border border-white/[0.04]">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <p className="text-xs font-medium text-zinc-400">Waiting for requests</p>
+                <p className="text-[11px] text-zinc-500 mt-1 max-w-[220px] mx-auto">
+                  Interact with tasks on the left to see live REST headers, status, and payload details
+                </p>
+              </div>
             ) : (
               logs.map((log) => (
                 <div
                   key={log.id}
-                  className="bg-neutral-950 border border-neutral-800/80 rounded-xl p-3 flex flex-col gap-1.5 font-mono text-xs"
+                  className="bg-zinc-950/70 border border-white/[0.06] hover:border-white/[0.12] rounded-xl p-3 flex flex-col gap-2 font-mono text-xs transition-colors duration-150"
                 >
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                       <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getMethodBadge(
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold border tracking-wider ${getMethodStyles(
                           log.method
                         )}`}
                       >
                         {log.method}
                       </span>
-                      <span className="text-neutral-300 truncate max-w-[170px]" title={log.url}>
+                      <span className="text-zinc-300 truncate max-w-[160px] text-[11px]" title={log.url}>
                         {log.url}
                       </span>
                     </div>
-                    <span
-                      className={`text-[11px] font-semibold ${
-                        log.status >= 200 && log.status < 300
-                          ? "text-emerald-400"
-                          : "text-rose-400"
-                      }`}
-                    >
-                      {log.status}
-                    </span>
+
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-[11px] font-semibold ${
+                          log.status >= 200 && log.status < 300
+                            ? "text-emerald-400"
+                            : "text-rose-400"
+                        }`}
+                      >
+                        {log.status}
+                      </span>
+                      <span className="text-[10px] text-zinc-600">{log.time}</span>
+                    </div>
                   </div>
 
                   {log.payload && (
-                    <div className="text-[11px] text-neutral-400 bg-neutral-900/60 rounded px-2 py-1 truncate">
-                      <span className="text-neutral-500">Body: </span>
-                      {log.payload}
+                    <div className="relative group/payload bg-zinc-900/60 rounded-lg p-2 text-[11px] text-zinc-300 border border-white/[0.04]">
+                      <div className="flex justify-between items-center text-[10px] text-zinc-500 mb-1">
+                        <span>Payload:</span>
+                        <button
+                          onClick={() => handleCopy(`p-${log.id}`, log.payload!)}
+                          className="text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                        >
+                          {copiedId === `p-${log.id}` ? "Copied" : "Copy"}
+                        </button>
+                      </div>
+                      <pre className="overflow-x-auto text-zinc-300 font-mono text-[10px] whitespace-pre-wrap">
+                        {log.payload}
+                      </pre>
                     </div>
                   )}
 
                   {log.response && (
-                    <div className="text-[11px] text-neutral-400 bg-neutral-900/60 rounded px-2 py-1 truncate">
-                      <span className="text-neutral-500">Response: </span>
-                      {log.response}
+                    <div className="bg-zinc-900/40 rounded-lg px-2.5 py-1.5 text-[11px] text-zinc-400 border border-white/[0.04]">
+                      <span className="text-zinc-500 text-[10px]">Response: </span>
+                      <span className="text-zinc-300">{log.response}</span>
                     </div>
                   )}
-
-                  <span className="text-[10px] text-neutral-600 text-right">{log.time}</span>
                 </div>
               ))
             )}
